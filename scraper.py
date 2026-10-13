@@ -198,11 +198,11 @@ def build_html(records):
         '<meta charset="utf-8">', '<meta name="viewport" content="width=device-width, initial-scale=1">',
         '<meta name="robots" content="index,follow">',
         '<title>Catalogo espositori Smart Building Levante</title>',
-        '<style>body{font:17px/1.6 system-ui,sans-serif;max-width:900px;margin:auto;padding:30px 18px;color:#172334}article{padding:1.2rem 0;border-top:1px solid #ddd}h1,h2{line-height:1.25}h2{margin-bottom:.4rem}dl{margin:0}dt{font-weight:700;display:inline}dd{display:inline;margin:0}dd:after{content:"";display:block;margin-bottom:.35rem}a{color:#0759a5}</style>',
+        '<style>body{font:17px/1.6 system-ui,sans-serif;max-width:900px;margin:auto;padding:30px 18px;color:#172334}article{padding:1.2rem 0;border-top:1px solid #ddd}h1,h2{line-height:1.25}h2{margin-bottom:.4rem}article p{margin:0 0 .35rem}</style>',
         '</head>', '<body>', '<main>',
         '<h1>Catalogo espositori Smart Building Levante</h1>',
         '<p>Trascrizione testuale del catalogo pubblico per consultazione e indicizzazione. '
-        'I dati possono variare: verificare sempre sulla <a href="' + e(CATALOG_URL) + '">fonte ufficiale</a>.</p>',
+        'I dati possono variare: verificare sempre sulla fonte ufficiale: ' + e(CATALOG_URL) + '</p>',
         f'<p><strong>Espositori:</strong> {len(records)}.</p>',
     ]
     fields = [('position', 'Padiglione e stand'), ('location', 'Indirizzo'),
@@ -212,11 +212,12 @@ def build_html(records):
     for rec in records:
         lines.append('<article>')
         lines.append(f'<h2>{e(rec["name"])}</h2>')
-        lines.append('<dl>')
+        # Solo titoli e paragrafi: gli estrattori di testo per RAG scartano
+        # spesso le liste di definizione (dl/dt/dd) e il testo dei link.
         for key, label in fields:
             if rec[key]:
-                lines.append(f'<div><dt>{e(label)}:</dt> <dd>{e(rec[key])}</dd></div>')
-        lines.extend(['</dl>', '</article>'])
+                lines.append(f'<p><strong>{e(label)}:</strong> {e(rec[key])}</p>')
+        lines.append('</article>')
     lines.extend(['</main>', '</body>', '</html>'])
     return '\n'.join(lines) + '\n'
 
