@@ -2,6 +2,7 @@
 """Produce una pagina HTML statica dal catalogo pubblico degli espositori."""
 import argparse
 import html
+import json
 import os
 import re
 import sys
@@ -14,11 +15,34 @@ import requests
 from bs4 import BeautifulSoup
 
 CATALOG_URL = 'https://www.smartbuildinglevante.it/it/catalogo-mibalevante/'
-AJAX_URL = 'https://www.smartbuildinglevante.it/mibalevante/wp-admin/admin-ajax.php'
+# Ripiego: l'endpoint reale viene letto dalla configurazione feAjax della pagina.
+AJAX_URL = 'https://www.smartbuildinglevante.it/wp-admin/admin-ajax.php'
 PER_PAGE = 200
 MIN_EXPECTED = int(os.getenv('MIN_EXPECTED_EXHIBITORS', '100'))
 TIMEOUT = 25
 HEADERS = {'User-Agent': 'CatalogoEspositoriSync/1.0 (knowledge-base mirror; public exhibition data)', 'Accept-Language': 'it-IT,it;q=0.9'}
+
+
+class AccessBlocked(Exception):
+    """La richiesta è stata bloccata prima di arrivare a WordPress (WAF, filtro IP)."""
+
+
+def page_ajax_config(text):
+    """Legge endpoint e nonce dall'oggetto feAjax pubblicato nella pagina."""
+    m = re.search(r'\bfeAjax\s*=\s*(\{.*?\})\s*;', text, re.S)
+    if not m:
+        return None, None
+    try:
+        cfg = json.loads(m.group(1))
+    except ValueError:
+        return None, None
+    url = cfg.get('url') if isinstance(cfg.get('url'), str) else None
+    nonce = cfg.get('nonce') if isinstance(cfg.get('nonce'), str) else None
+    if url:
+        url = urljoin(CATALOG_URL, url)
+        if urlparse(url).hostname != urlparse(CATALOG_URL).hostname:
+            url = None
+    return url, nonce
 
 
 def nonce_candidates(text):
@@ -43,7 +67,8 @@ def locate_nonces(session):
     r = session.get(CATALOG_URL, timeout=TIMEOUT)
     r.raise_for_status()
     soup = BeautifulSoup(r.text, 'html.parser')
-    candidates = nonce_candidates(r.text)
+    ajax_url, page_nonce = page_ajax_config(r.text)
+    candidates = ([page_nonce] if page_nonce else []) + nonce_candidates(r.text)
     scripts = []
     for s in soup.select('script[src]'):
         url = urljoin(CATALOG_URL, s.get('src', ''))
@@ -68,17 +93,29 @@ def locate_nonces(session):
             candidates.extend(nonce_candidates(response.text))
         except requests.RequestException as exc:
             print('Avviso: script non accessibile:', url, str(exc), file=sys.stderr)
-    return list(dict.fromkeys(candidates))
+    return ajax_url or AJAX_URL, list(dict.fromkeys(candidates))
 
 
-def ajax_page(session, nonce, page):
+def ajax_page(session, ajax_url, nonce, page):
     params = {
         'action': 'fe_filter', 'nonce': nonce, 'lang': 'it',
         'paged': str(page), 'per_page': str(PER_PAGE),
         'orderby': 'title', 'order': 'ASC', 'search': ''
     }
-    r = session.post(AJAX_URL, data=params, timeout=TIMEOUT,
+    r = session.post(ajax_url, data=params, timeout=TIMEOUT,
                      headers={'Referer': CATALOG_URL, 'Origin': 'https://www.smartbuildinglevante.it'})
+    if r.status_code in (400, 403):
+        body = r.text.strip()
+        # WordPress risponde "-1" (nonce respinto) o "0" (azione non registrata):
+        # in questi casi la richiesta è arrivata a destinazione.
+        if body == '-1':
+            raise ValueError(f'HTTP {r.status_code} da WordPress: nonce respinto per {ajax_url}.')
+        if body == '0':
+            raise ValueError(f'HTTP {r.status_code} da WordPress: azione fe_filter non registrata su {ajax_url}.')
+        if r.status_code == 403:
+            snippet = ' '.join(body[:200].split())
+            raise AccessBlocked(f'HTTP 403 non generato da WordPress per {ajax_url}: probabile blocco delle richieste '
+                                f'(Server: {r.headers.get("Server", "?")}; risposta: {snippet!r}).')
     r.raise_for_status()
     payload = r.json()
     if not isinstance(payload, dict) or payload.get('success') is not True:
@@ -119,13 +156,14 @@ def extract_cards(fragment):
 
 
 def fetch_all(session):
-    nonces = locate_nonces(session)
+    ajax_url, nonces = locate_nonces(session)
+    print('Endpoint AJAX:', ajax_url)
     if not nonces:
         raise RuntimeError('Nonce non trovato nell\'HTML o negli script WordPress. Controlla la pagina e aggiorna i pattern di locate_nonces().')
     first = None
     for candidate in nonces:
         try:
-            attempt = ajax_page(session, candidate, 1)
+            attempt = ajax_page(session, ajax_url, candidate, 1)
             if extract_cards(attempt['html']):
                 first = attempt
                 break
@@ -139,7 +177,7 @@ def fetch_all(session):
         raise ValueError(f'Conteggi sospetti: found={found}, max_pages={pages}. Pubblicazione annullata.')
     records = {}
     for p in range(1, pages + 1):
-        data = first if p == 1 else ajax_page(session, candidate, p)
+        data = first if p == 1 else ajax_page(session, ajax_url, candidate, p)
         extracted = extract_cards(data['html'])
         overlap = records.keys() & extracted.keys()
         if overlap:
