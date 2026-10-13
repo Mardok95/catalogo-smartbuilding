@@ -1,0 +1,52 @@
+name: Aggiorna catalogo espositori
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Tutti i giorni alle 04:17 UTC (06:17 ora italiana estiva, 05:17 invernale).
+    - cron: '17 4 * * *'
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: catalogo-pages
+  cancel-in-progress: false
+
+jobs:
+  aggiorna:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - name: Dipendenze
+        run: pip install -r requirements.txt
+      - name: Scarica e valida il catalogo
+        run: python scraper.py --output index.html
+      - name: Commit della verifica e delle eventuali modifiche
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add index.html last-check.txt
+          if ! git diff --cached --quiet; then
+            git commit -m 'Aggiornamento/verifica catalogo espositori'
+            git push
+          fi
+      - name: Configura GitHub Pages
+        uses: actions/configure-pages@v5
+      - name: Carica artefatto per Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+      - name: Pubblica GitHub Pages
+        uses: actions/deploy-pages@v4
+        id: deployment
