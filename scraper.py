@@ -14,9 +14,9 @@ from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
 
-CATALOG_URL = 'https://www.smartbuildinglevante.it/it/catalogo-mibalevante/'
+CATALOG_URL = 'https://www.smartbuildinglevante.it/mibalevante/it/catalogo-mibalevante/'
 # Ripiego: l'endpoint reale viene letto dalla configurazione feAjax della pagina.
-AJAX_URL = 'https://www.smartbuildinglevante.it/wp-admin/admin-ajax.php'
+AJAX_URL = 'https://www.smartbuildinglevante.it/mibalevante/wp-admin/admin-ajax.php'
 PER_PAGE = 200
 MIN_EXPECTED = int(os.getenv('MIN_EXPECTED_EXHIBITORS', '100'))
 TIMEOUT = 25
