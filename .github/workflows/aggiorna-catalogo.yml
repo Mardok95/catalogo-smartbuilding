@@ -31,21 +31,21 @@ jobs:
       - name: Dipendenze
         run: pip install -r requirements.txt
       - name: Scarica e valida il catalogo
-        run: python scraper.py --output index.html
+        run: python scraper.py --output index.html --names-output nomi.html
       - name: Commit della verifica e delle eventuali modifiche
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add index.html last-check.txt
+          git add index.html nomi.html last-check.txt
           if ! git diff --cached --quiet; then
             git commit -m 'Aggiornamento/verifica catalogo espositori'
             git push
           fi
-      # Su Pages va solo la pagina del catalogo, non l'intero repository.
+      # Su Pages vanno solo il catalogo e l'elenco nomi, non l'intero repository.
       - name: Prepara il contenuto da pubblicare
         run: |
           mkdir _site
-          cp index.html _site/
+          cp index.html nomi.html _site/
       - name: Configura GitHub Pages
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
       - name: Carica artefatto per Pages

@@ -222,21 +222,63 @@ def build_html(records):
     return '\n'.join(lines) + '\n'
 
 
+STAND_RE = re.compile(r'^\s*(?:Pad\.?\s*)?(?P<pad>.*?)\s*(?:·\s*Stand\s*(?P<stand>.+))?\s*$', re.I)
+
+
+def split_position(position):
+    """'Pad. Nuovo Padiglione · Stand 110' -> ('Nuovo Padiglione', '110')."""
+    m = STAND_RE.match(position or '')
+    return (m.group('pad') or '').strip(), (m.group('stand') or '').strip()
+
+
+def build_names_html(records):
+    """Elenco compatto nome -> stand, da usare in ElevenLabs in modalità Prompt.
+
+    Serve all'agente per riconoscere i nomi storpiati dal riconoscimento vocale;
+    i dettagli restano nel catalogo completo (index.html), recuperato via RAG.
+    """
+    e = lambda x: html.escape(str(x), quote=True)
+    parsed = [(rec['name'], *split_position(rec['position'])) for rec in records]
+    pads = {pad for _, pad, _ in parsed if pad}
+    common_pad = pads.pop() if len(pads) == 1 else None
+    lines = [
+        '<!doctype html>', '<html lang="it">', '<head>', '<meta charset="utf-8">',
+        '<meta name="robots" content="noindex,nofollow">',
+        '<title>Elenco nomi espositori Smart Building Levante</title>',
+        '</head>', '<body>', '<main>',
+        '<h1>Elenco nomi espositori Smart Building Levante</h1>',
+        f'<p>{len(records)} espositori. Formato: nome: stand.'
+        + (f' Tutti nel {e(common_pad)}.' if common_pad else '') + '</p>',
+    ]
+    for name, pad, stand in parsed:
+        where = stand or 'stand non indicato'
+        if pad and not common_pad:
+            where = f'{pad}, {where}'
+        lines.append(f'<p>{e(name)}: {e(where)}</p>')
+    lines.extend(['</main>', '</body>', '</html>'])
+    return '\n'.join(lines) + '\n'
+
+
+def write_if_changed(target, content, count):
+    target = Path(target)
+    if target.exists() and target.read_text(encoding='utf-8') == content:
+        print(f'{target} invariato.')
+    else:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding='utf-8')
+        print(f'Creato {target}: {count} aziende.')
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--output', default='index.html')
+    parser.add_argument('--names-output', default='nomi.html')
     args = parser.parse_args()
     session = requests.Session()
     session.headers.update(HEADERS)
     records = fetch_all(session)
-    result = build_html(records)
-    target = Path(args.output)
-    if target.exists() and target.read_text(encoding='utf-8') == result:
-        print('Catalogo invariato, nessuna modifica a index.html.')
-    else:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(result, encoding='utf-8')
-        print(f'Creato {target}: {len(records)} aziende.')
+    write_if_changed(args.output, build_html(records), len(records))
+    write_if_changed(args.names_output, build_names_html(records), len(records))
     Path('last-check.txt').write_text('Ultimo controllo riuscito (UTC): ' + datetime.now(timezone.utc).isoformat() + '\n', encoding='utf-8')
 
 
